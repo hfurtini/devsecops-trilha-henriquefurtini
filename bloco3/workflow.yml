@@ -1,0 +1,64 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Dependencies Installation
+        run: |
+          cd app
+          npm install
+
+      # GATE 1: Semgrep
+      - name: Gate 1 - Semgrep SAST
+        uses: semgrep/actions@v1
+        with:
+          config: p/default
+
+      # GATE 2: Gitleaks
+      - name: Gate 2 - Gitleaks Secret Detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # GATE 3A: Trivy
+      - name: Gate 3A - Trivy Dependency Scan (SCA)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './app'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Build Docker Image
+        run: docker build -t app-local:latest ./app
+
+      - name: Gate 3B - Trivy Container Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'app-local:latest'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+      # GATE 4: Deploy Automático
+      - name: Gate 4 - Trigger Render Auto-Deploy
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

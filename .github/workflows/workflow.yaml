@@ -1,22 +1,64 @@
-name: Continuos Integration
+name: DevSecOps Pipeline
 
-on: [pull_request, push]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-jobs: 
-  continuos-integration:
+jobs:
+  security-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
-      - name: setup Node.js 
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
-        with: 
+        with:
           node-version: "20"
-      - name: install, build and test
+
+      - name: Dependencies Installation
         run: |
           cd app
           npm install
-      - name: run semgrep SAST
-        uses: docker://semgrep/semgrep
+
+      # GATE 1: Semgrep
+      - name: Gate 1 - Semgrep SAST
+        uses: semgrep/actions@v1
         with:
-          args: semgrep scan --config=auto --error app/
+          config: p/default
+
+      # GATE 2: Gitleaks
+      - name: Gate 2 - Gitleaks Secret Detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # GATE 3A: Trivy
+      - name: Gate 3A - Trivy Dependency Scan (SCA)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './app'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Build Docker Image
+        run: docker build -t app-local:latest ./app
+
+      - name: Gate 3B - Trivy Container Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'app-local:latest'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+      # GATE 4: Deploy Automático
+      - name: Gate 4 - Trigger Render Auto-Deploy
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
