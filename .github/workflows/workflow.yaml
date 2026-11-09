@@ -28,7 +28,7 @@ jobs:
 
       # GATE 1: Semgrep
       - name: Gate 1 - Semgrep SAST
-        uses: semgrep/actions@v1
+        uses: returntocorp/semgrep-action@v1
         with:
           config: p/default
 
