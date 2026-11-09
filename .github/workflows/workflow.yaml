@@ -48,7 +48,7 @@ jobs:
           exit-code: '1'
 
       - name: Build Docker Image
-        run: docker build -t app-local:latest ./app
+        run: docker build --no-cache -t app-local:latest ./app
 
       - name: Gate 3B - Trivy Container Image Scan
         uses: aquasecurity/trivy-action@master
