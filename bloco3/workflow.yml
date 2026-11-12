@@ -2,63 +2,79 @@ name: DevSecOps Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# deploy feito pelo próprio Render com Auto-Deploy configurado 
 
 jobs:
-  security-and-deploy:
+  build:
+    name: Install and build
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0 
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Dependencies Installation
+          node-version: "22"
+      - name: Install dependencies
+        working-directory: app
         run: |
-          cd app
-          npm install
+          npm ci
+          npm run build --if-present
+          npm test --if-present
 
-      # GATE 1: Semgrep
-      - name: Gate 1 - Semgrep SAST
-        uses: returntocorp/semgrep-action@v1
+  sast:
+    name: Gate 1 - Semgrep SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Semgrep
+        uses: docker://semgrep/semgrep
         with:
-          config: p/default
+          args: semgrep scan --config=auto --error app/
 
-      # GATE 2: Gitleaks
-      - name: Gate 2 - Gitleaks Secret Detection
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # GATE 3A: Trivy
-      - name: Gate 3A - Trivy Dependency Scan (SCA)
-        uses: aquasecurity/trivy-action@master
+  secret-scan:
+    name: Gate 2 - Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          scan-type: 'fs'
-          scan-ref: './app'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
+          fetch-depth: 0
+      - name: Run Gitleaks (hiastórico completo)
+        run: |
+          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --redact -v --exit-code 2
 
-      - name: Build Docker Image
+  sca:
+    name: Gate 3A - Trivy dependencies (SCA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: ./app
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+  image-scan:
+    name: Gate 3B - Trivy container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
         run: docker build -t app-local:latest ./app
-
-      - name: Gate 3B - Trivy Container Image Scan
-        uses: aquasecurity/trivy-action@master
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: 'app-local:latest'
-          severity: 'CRITICAL'
-          exit-code: '1'
-
-      # GATE 4: Deploy Automático
-      - name: Gate 4 - Trigger Render Auto-Deploy
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          image-ref: app-local:latest
+          severity: CRITICAL
+          exit-code: "1"
