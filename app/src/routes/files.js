@@ -8,10 +8,11 @@ const UPLOADS_DIR = path.resolve(__dirname, "..", "..", "uploads");
 function getSafeUploadPath(requestedName, callback) {
   fs.readdir(UPLOADS_DIR, (err, files) => {
     if (err) return callback(err, null);
-    if (!files.includes(requestedName)) return callback(null, null);
 
-    const safePath = path.join(UPLOADS_DIR, path.basename(requestedName));
-    callback(null, safePath);
+    const match = files.find((name) => name === requestedName);
+    if (!match) return callback(null, null);
+
+    callback(null, path.join(UPLOADS_DIR, match));
   });
 }
 
