@@ -10,11 +10,14 @@ router.get("/:filename", (req, res) => {
   fs.readdir(UPLOADS_DIR, (dirErr, files) => {
     if (dirErr) return res.status(500).json({ error: "Erro ao acessar diretório" });
 
-    const matchedFile = files.find((file) => file === req.params.filename);
-    if (!matchedFile) return res.status(404).json({ error: "Arquivo não encontrado" });
+    const allowedPaths = new Map(
+      files.map((entry) => [entry, path.join(UPLOADS_DIR, entry)])
+    );
 
-    const filePath = path.join(UPLOADS_DIR, matchedFile);
-    fs.readFile(filePath, "utf8", (err, data) => {
+    const safeFilePath = allowedPaths.get(req.params.filename);
+    if (!safeFilePath) return res.status(404).json({ error: "Arquivo não encontrado" });
+
+    fs.readFile(safeFilePath, "utf8", (err, data) => {
       if (err) return res.status(404).json({ error: "Arquivo não encontrado" });
       res.type("text/plain").send(data);
     });
