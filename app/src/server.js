@@ -1,4 +1,6 @@
 const express = require("express");
+const cookieParser = require("cookie-parser");
+const csrf = require("csurf");
 const _ = require("lodash");
 
 const tasksRouter = require("./routes/tasks");
@@ -9,6 +11,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(cookieParser());
+app.use(csrf({ cookie: true }));
 
 // Healthcheck - usado pelo Render para saber se a aplicação está no ar.
 app.get("/health", (req, res) => {

@@ -2,6 +2,33 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 
+const ALLOWED_FIELDS = ["id", "title", "owner", "completed"];
+
+function matchTaskExpression(task, expr) {
+  const trimmed = String(expr).trim();
+  const match = trimmed.match(/^([a-zA-Z]+)\s*(==|!=|contains)\s*(.+)$/);
+
+  if (!match) {
+    throw new Error("Formato esperado: <campo> <==|!=|contains> <valor>");
+  }
+
+  const [, field, operator, rawValue] = match;
+  if (!ALLOWED_FIELDS.includes(field)) {
+    throw new Error(`Campo não permitido: ${field}`);
+  }
+
+  const cleanValue = rawValue.replace(/^['"]|['"]$/g, "").trim();
+  const taskVal = task[field];
+
+  if (operator === "==") {
+    return String(taskVal).toLowerCase() === cleanValue.toLowerCase();
+  }
+  if (operator === "!=") {
+    return String(taskVal).toLowerCase() !== cleanValue.toLowerCase();
+  }
+  return String(taskVal ?? "").toLowerCase().includes(cleanValue.toLowerCase());
+}
+
 // GET /api/tasks - lista todas as tarefas
 router.get("/", (req, res) => {
   res.json(db.listTasks());
@@ -13,7 +40,7 @@ router.get("/filter", (req, res) => {
   if (!expr) return res.status(400).json({ error: "Parâmetro 'expr' é obrigatório" });
   try {
     const tasks = db.listTasks();
-    const result = tasks.filter((t) => eval(expr));
+    const result = tasks.filter((t) => matchTaskExpression(t, expr));
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: "Expressão inválida", details: err.message });

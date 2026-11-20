@@ -1,22 +1,76 @@
-name: Continuos Integration
+name: DevSecOps Pipeline
 
-on: [pull_request, push]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-jobs: 
-  continuos-integration:
+jobs:
+  sast-semgrep:
+    name: SAST - Semgrep
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v3
-      - name: setup Node.js 
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
-        with: 
+        with:
           node-version: "20"
-      - name: install, build and test
+
+      - name: Install dependencies
         run: |
           cd app
           npm install
-      - name: run semgrep SAST
+
+      - name: Run Semgrep SAST
         uses: docker://semgrep/semgrep
         with:
           args: semgrep scan --config=auto --error app/
+
+  secret-scan-gitleaks:
+    name: Secret Scan - Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks (Full History)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:latest detect --source="/repo" --verbose --redact
+
+  sca-container-trivy:
+    name: SCA & Container Scan - Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy SCA (Dependências)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "./app"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+
+      - name: Build Docker Image
+        run: docker build -t app-saci:scan ./app
+
+      - name: Trivy Container Scan (Imagem Docker)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "app-saci:scan"
+          format: "table"
+          ignore-unfixed: true
+          severity: "CRITICAL"
+          exit-code: "1"
+
+  deploy-render:
+    name: Deploy - Render
+    needs: [sast-semgrep, secret-scan-gitleaks, sca-container-trivy]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy Hook
+        run: curl -f -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"

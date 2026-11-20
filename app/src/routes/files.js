@@ -3,15 +3,31 @@ const router = express.Router();
 const fs = require("fs");
 const path = require("path");
 
-const UPLOADS_DIR = path.join(__dirname, "..", "..", "uploads");
+const UPLOADS_DIR = path.resolve(__dirname, "..", "..", "uploads");
+
+function getSafeUploadPath(requestedName, callback) {
+  fs.readdir(UPLOADS_DIR, (err, files) => {
+    if (err) return callback(err, null);
+    if (!files.includes(requestedName)) return callback(null, null);
+
+    // Falso positivo: requestedName só chega aqui se existir em readdir()
+    // (allowlist) e ainda passa por path.basename().
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+    const safePath = path.join(UPLOADS_DIR, path.basename(requestedName));
+    callback(null, safePath);
+  });
+}
 
 // GET /api/files/:filename - lê e devolve o conteúdo de um arquivo da pasta uploads/
 router.get("/:filename", (req, res) => {
-  const filePath = path.join(UPLOADS_DIR, req.params.filename);
+  getSafeUploadPath(req.params.filename, (dirErr, filePath) => {
+    if (dirErr) return res.status(500).json({ error: "Erro ao acessar diretório" });
+    if (!filePath) return res.status(404).json({ error: "Arquivo não encontrado" });
 
-  fs.readFile(filePath, "utf8", (err, data) => {
-    if (err) return res.status(404).json({ error: "Arquivo não encontrado" });
-    res.type("text/plain").send(data);
+    fs.readFile(filePath, "utf8", (err, data) => {
+      if (err) return res.status(404).json({ error: "Arquivo não encontrado" });
+      res.type("text/plain").send(data);
+    });
   });
 });
 
